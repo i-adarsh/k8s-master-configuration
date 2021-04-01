@@ -1,0 +1,96 @@
+---
+# tasks file for configure_master
+
+- name: Installing Required Packages
+  package:
+          name:
+                  - docker
+                  - iproute-tc
+          state: present
+  become: yes
+
+- name: Disabling SELinux
+  selinux: 
+    state: disabled
+  ignore_errors: yes
+
+- name: Configuring Kubernetes Repository
+  yum_repository:
+    name: kubernetes
+    description: kubernetes yum repository
+    baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+    gpgcheck: no
+  become: yes
+
+- name: Installing Kubernetes
+  package:
+          name: "kubeadm"
+          state: present
+
+- name: Changing Docker Driver to systemd
+  copy:
+          content: '{
+                    "exec-opts": ["native.cgroupdriver=systemd"]
+                    }'
+          dest: /etc/docker/daemon.json
+  become: yes
+
+- name: Adding Kubernetes Bridges
+  copy:
+          dest: /etc/sysctl.d/k8s.conf
+          content:
+                    - "net.bridge.bridge-nf-call-ip6tables = 1"
+                    - "net.bridge.bridge-nf-call-iptables = 1"
+  become: yes
+
+- name: Starting Systemctl Services
+  command: "sysctl --system"
+  become: yes
+
+- name: Starting Docker Services
+  service:
+          name: docker
+          state: restarted
+          enabled: yes
+  become: yes
+
+- name: Starting and Enabling Kubelet service permanently
+  service: 
+    name: kubelet
+    state: started
+    enabled: yes
+
+- name: Pulling Docker Images
+  command: "kubeadm config images pull"
+
+- name: Initiliasing Kubeadm and Ignoring RAM and CPU Error
+  shell: "kubeadm init --pod-network-cidr=10.240.0.0/16 --ignore-preflight-errors=NumCPU  --ignore-preflight-errors=Mem"
+  become: yes
+
+- name: Setting-Up Some Extra things
+  command: mkdir -p $HOME/.kube
+  become: yes
+
+- name: Copying Some Files
+  shell: cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  become: yes
+
+- name: Changing Ownership
+  shell: chown $(id -u):$(id -g) $HOME/.kube/config
+  become: yes
+
+
+- name: Applying AddOns
+  shell: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+  become: yes
+
+- name: Changing Permissions
+  shell: "export KUBECONFIG=/etc/kubernetes/admin.conf"
+
+- name: Printing the Join command for worker nodes
+  shell: "kubeadm token create --print-join-command"
+  register: token
+
+- name: Below is the Join Command Don't forget to Copy the Command
+  debug:
+    msg: "{{ token['stdout'] }}"
